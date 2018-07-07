@@ -66,6 +66,9 @@ func main() {
 
 func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurrency.Session, done chan bool) {
 	defer func() { done <- true }()
+	var err error
+	var lastRevision int64 = -1
+	currentValue := 0
 	m := concurrency.NewMutex(session, "/counter/lock")
 
 	for {
@@ -80,21 +83,10 @@ func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurr
 			log.Fatalf("error getting lock: %s", err)
 		}
 
-		gr, err := kv.Get(ctx, "/counter/current")
-		if err != nil {
+		if m.Header().Revision != lastRevision + 1 {
+			currentValue, err = getValue(ctx, kv)
 			if err == context.Canceled {
 				return
-			}
-			log.Fatalf("error getting current counter value: %s", err)
-		}
-
-		currentValue := 0
-		if len(gr.Kvs) > 0 {
-			// Note: this would overflow but it is constrained by the maxval flag
-			currentValue, err = strconv.Atoi(string(gr.Kvs[0].Value))
-			if err != nil {
-				// should not happen
-				log.Fatalf("invalid value for counter in etcd: could not conver to int: %s", err)
 			}
 		}
 
@@ -105,7 +97,7 @@ func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurr
 
 		currentValue++
 		printFizzBuzz(currentValue)
-		_, err = kv.Put(ctx, "/counter/current", strconv.Itoa(currentValue))
+		_, err := kv.Put(ctx, "/counter/current", strconv.Itoa(currentValue))
 		if err != nil {
 			if err == context.Canceled {
 				return
@@ -133,6 +125,28 @@ func printFizzBuzz(num int) {
 	} else {
 		fmt.Println(num)
 	}
+}
+
+func getValue(ctx context.Context, kv clientv3.KV) (int, error) {
+	value := 0
+	gr, err := kv.Get(ctx, "/counter/current")
+	if err != nil {
+		if err == context.Canceled {
+			return 0, err
+		}
+		log.Fatalf("error getting current counter value: %s", err)
+	}
+
+	if len(gr.Kvs) > 0 {
+		// Note: this would overflow but it is constrained by the maxval flag
+		value, err = strconv.Atoi(string(gr.Kvs[0].Value))
+		if err != nil {
+			// should not happen
+			log.Fatalf("invalid value for counter in etcd: could not conver to int: %s", err)
+		}
+	}
+
+	return value, nil
 }
 
 // Deletes the counter key to reset it
