@@ -1,16 +1,18 @@
 package main
 
 import (
+	"context"
+	"flag"
+	"fmt"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/clientv3/concurrency"
-	"context"
-	"time"
-	"fmt"
 	"log"
-	"flag"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
+	"time"
 )
 
 const (
@@ -23,12 +25,15 @@ var bench = flag.Bool("bench", false, "Runs basic benchmark")
 var maxValue = flag.Int("maxval", 20, "Maximum counter value")
 
 func main() {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cli, _ := clientv3.New(clientv3.Config{
 		DialTimeout: dialTimeout,
-		Endpoints: []string{"127.0.0.1:2379"},
+		Endpoints:   []string{"127.0.0.1:2379"},
 	})
 	defer cli.Close()
 	kv := clientv3.NewKV(cli)
@@ -116,8 +121,8 @@ func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurr
 }
 
 func printFizzBuzz(num int) {
-	fizz := num % 3 == 0
-	buzz := num % 5 == 0
+	fizz := num%3 == 0
+	buzz := num%5 == 0
 
 	if fizz && buzz {
 		fmt.Println("FizzBuzz")
@@ -173,4 +178,6 @@ func runBench(ctx context.Context, kv clientv3.KV, session *concurrency.Session)
 	value, _ := getValue(ctx, kv)
 
 	fmt.Printf("Benchmark completed. Reached %d in %0.3f seconds\n", value, float64(diff.Nanoseconds())/float64(time.Second))
+
+	time.Sleep(10 * time.Second) // enough time for the profiler to finish
 }
