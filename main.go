@@ -73,7 +73,6 @@ func main() {
 func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurrency.Session, done chan bool) {
 	defer func() { done <- true }()
 	var err error
-	var lastRevision int64 = -1
 	currentValue := 0
 	m := concurrency.NewMutex(session, "/counter/lock")
 
@@ -89,12 +88,9 @@ func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurr
 			log.Fatalf("error getting lock: %s", err)
 		}
 
-		// Lock() adds 3 revisions to the key
-		if m.Header().Revision != lastRevision + 3 {
-			currentValue, err = getValue(ctx, kv)
-			if err == context.Canceled {
-				return
-			}
+		currentValue, err = getValue(ctx, kv)
+		if err == context.Canceled {
+			return
 		}
 
 		if currentValue >= *maxValue {
@@ -116,7 +112,6 @@ func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurr
 
 		// defer not required as it will release with the session if there is an error
 		m.Unlock(ctx)
-		lastRevision = m.Header().Revision
 	}
 }
 
