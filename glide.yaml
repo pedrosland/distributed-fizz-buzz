@@ -1,0 +1,6 @@
+package: github.com/pedrosland/distributed-fizz-buzz
+import:
+- package: github.com/coreos/etcd
+  version: ^3.3.8
+  subpackages:
+  - clientv3

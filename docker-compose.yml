@@ -1,0 +1,20 @@
+version: '3'
+
+services:
+  etcd0:
+    image: gcr.io/etcd-development/etcd:v3.3.8
+    command:
+      - etcd
+      - --name=etcd0
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd0:2379
+      - --initial-advertise-peer-urls=http://etcd0:2380
+      - --initial-cluster-token=etcd-cluster-1
+      - --initial-cluster=etcd0=http://etcd0:2380
+      - --initial-cluster-state=new
+    volumes:
+      - /usr/share/ca-certificates/:/etc/ssl/certs
+    ports:
+      - "4001:4001"
+      - "2380:2380"
+      - "2379:2379"

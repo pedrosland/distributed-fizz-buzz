@@ -1,0 +1,8 @@
+hash: f0d68713aa1d1145d3dce6ebb479a7f17b597fe7a3099fd4c63b3cc813b870a1
+updated: 2018-07-07T18:45:47.965189+01:00
+imports:
+- name: github.com/coreos/etcd
+  version: 33245c6b5b49130ca99280408fadfab01aac0e48
+  subpackages:
+  - clientv3
+testImports: []
