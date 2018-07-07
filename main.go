@@ -19,6 +19,7 @@ const (
 )
 
 var reset = flag.Bool("reset", false, "Reset the counter")
+var bench = flag.Bool("bench", false, "Runs basic benchmark")
 var maxValue = flag.Int("maxval", 20, "Maximum counter value")
 
 func main() {
@@ -40,6 +41,11 @@ func main() {
 	if *reset {
 		resetEtcd(ctx, kv)
 		log.Print("etcd counter reset")
+	}
+
+	if *bench {
+		runBench(ctx, kv, session)
+		return
 	}
 
 	c := make(chan os.Signal, 1)
@@ -83,7 +89,8 @@ func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurr
 			log.Fatalf("error getting lock: %s", err)
 		}
 
-		if m.Header().Revision != lastRevision + 1 {
+		// Lock() adds 3 revisions to the key
+		if m.Header().Revision != lastRevision + 3 {
 			currentValue, err = getValue(ctx, kv)
 			if err == context.Canceled {
 				return
@@ -109,6 +116,7 @@ func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurr
 
 		// defer not required as it will release with the session if there is an error
 		m.Unlock(ctx)
+		lastRevision = m.Header().Revision
 	}
 }
 
@@ -149,11 +157,25 @@ func getValue(ctx context.Context, kv clientv3.KV) (int, error) {
 	return value, nil
 }
 
-// Deletes the counter key to reset it
+// resetEtcd deletes the counter key to reset it
 func resetEtcd(ctx context.Context, kv clientv3.KV) {
 	ctx, _ = context.WithTimeout(ctx, requestTimeout)
 	_, err := kv.Delete(ctx, "/counter/current")
 	if err != nil {
 		log.Fatalf("error resetting current counter value: %s", err)
 	}
+}
+
+// runBench runs a particularly untrustworthy benchmark
+func runBench(ctx context.Context, kv clientv3.KV, session *concurrency.Session) {
+	done := make(chan bool, 1)
+	resetEtcd(ctx, kv)
+
+	start := time.Now()
+	StartFizzBuzzer(ctx, kv, session, done)
+	diff := time.Now().Sub(start)
+
+	value, _ := getValue(ctx, kv)
+
+	fmt.Printf("Benchmark completed. Reached %d in %0.3f seconds\n", value, float64(diff.Nanoseconds())/float64(time.Second))
 }
