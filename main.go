@@ -186,5 +186,7 @@ func runBench(ctx context.Context, kv clientv3.KV, session *concurrency.Session)
 
 	fmt.Printf("Benchmark completed. Reached %d in %0.3f seconds\n", value, float64(diff.Nanoseconds())/float64(time.Second))
 
-	time.Sleep(10 * time.Second) // enough time for the profiler to finish
+	if *pprof {
+		time.Sleep(10 * time.Second) // enough time for the profiler to finish
+	}
 }
