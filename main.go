@@ -22,19 +22,26 @@ const (
 
 var reset = flag.Bool("reset", false, "Reset the counter")
 var bench = flag.Bool("bench", false, "Runs basic benchmark")
+var pprof = flag.Bool("pprof", false, "Enable pprof")
 var maxValue = flag.Int("maxval", 20, "Maximum counter value")
 
 func main() {
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
 	flag.Parse()
 
+	if *pprof {
+		go func() {
+			log.Println(http.ListenAndServe("localhost:6060", nil))
+		}()
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
-	cli, _ := clientv3.New(clientv3.Config{
+	cli, err := clientv3.New(clientv3.Config{
 		DialTimeout: dialTimeout,
 		Endpoints:   []string{"127.0.0.1:2379"},
 	})
+	if err != nil {
+		log.Fatalf("error connecting to etcd: %s", err)
+	}
 	defer cli.Close()
 	kv := clientv3.NewKV(cli)
 	session, err := concurrency.NewSession(cli)
