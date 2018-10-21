@@ -4,8 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/clientv3/concurrency"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -13,6 +11,9 @@ import (
 	"os/signal"
 	"strconv"
 	"time"
+
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/clientv3/concurrency"
 )
 
 const (
@@ -82,6 +83,7 @@ func main() {
 	log.Print("Done")
 }
 
+// StartFizzBuzzer starts a loop to acquire a lock and print a message.
 func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurrency.Session, done chan bool) {
 	defer func() { done <- true }()
 	var err error
@@ -89,7 +91,8 @@ func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurr
 	m := concurrency.NewMutex(session, "/counter/lock")
 
 	for {
-		ctx, _ := context.WithTimeout(parentCtx, requestTimeout)
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(parentCtx, requestTimeout)
 		if err := m.Lock(ctx); err != nil {
 			if err == context.Canceled {
 				return
@@ -110,23 +113,29 @@ func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurr
 			return
 		}
 
+		// free resources
+		cancel()
+
 		currentValue++
 		printFizzBuzz(currentValue)
-		_, err := kv.Put(ctx, "/counter/current", strconv.Itoa(currentValue))
+
+		// create new context to allow saving even if main context is cancelled
+		newCtx, cancel := context.WithTimeout(context.Background(), requestTimeout-time.Since(start))
+		_, err := kv.Put(newCtx, "/counter/current", strconv.Itoa(currentValue))
 		if err != nil {
-			if err == context.Canceled {
-				return
-			}
 			log.Fatalf("error updating counter value: %s", err)
 		}
 
-		//time.Sleep(1 * time.Second)
+		time.Sleep(1 * time.Second)
 
 		// defer not required as it will release with the session if there is an error
-		m.Unlock(ctx)
+		m.Unlock(newCtx)
+		// free resources
+		cancel()
 	}
 }
 
+// printFizzBuzz is the traditional Fizz Buzz logic.
 func printFizzBuzz(num int) {
 	fizz := num%3 == 0
 	buzz := num%5 == 0
@@ -142,6 +151,7 @@ func printFizzBuzz(num int) {
 	}
 }
 
+// getValue gets the current value of the counter from etcd.
 func getValue(ctx context.Context, kv clientv3.KV) (int, error) {
 	value := 0
 	gr, err := kv.Get(ctx, "/counter/current")
