@@ -86,8 +86,6 @@ func main() {
 // StartFizzBuzzer starts a loop to acquire a lock and print a message.
 func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurrency.Session, done chan bool) {
 	defer func() { done <- true }()
-	var err error
-	currentValue := 0
 	m := concurrency.NewMutex(session, "/counter/lock")
 
 	for {
@@ -103,7 +101,7 @@ func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurr
 			log.Fatalf("error getting lock: %s", err)
 		}
 
-		currentValue, err = getValue(ctx, kv)
+		currentValue, modRevision, err := getValue(ctx, kv)
 		if err == context.Canceled {
 			return
 		}
@@ -121,9 +119,17 @@ func StartFizzBuzzer(parentCtx context.Context, kv clientv3.KV, session *concurr
 
 		// create new context to allow saving even if main context is cancelled
 		newCtx, cancel := context.WithTimeout(context.Background(), requestTimeout-time.Since(start))
-		_, err := kv.Put(newCtx, "/counter/current", strconv.Itoa(currentValue))
+
+		// only store the updated value if soneone hasn't already updated it since we fetched it
+		r, err := kv.Txn(newCtx).
+			If(clientv3.Compare(clientv3.ModRevision("/counter/current"), "=", modRevision)).
+			Then(clientv3.OpPut("/counter/current", strconv.Itoa(currentValue))).
+			Commit()
 		if err != nil {
 			log.Fatalf("error updating counter value: %s", err)
+		}
+		if len(r.Responses) == 0 {
+			log.Printf("something happened to lock but avoided overwriting newer value")
 		}
 
 		time.Sleep(1 * time.Second)
@@ -152,26 +158,27 @@ func printFizzBuzz(num int) {
 }
 
 // getValue gets the current value of the counter from etcd.
-func getValue(ctx context.Context, kv clientv3.KV) (int, error) {
-	value := 0
+func getValue(ctx context.Context, kv clientv3.KV) (int, int64, error) {
 	gr, err := kv.Get(ctx, "/counter/current")
 	if err != nil {
 		if err == context.Canceled {
-			return 0, err
+			return 0, 0, err
 		}
 		log.Fatalf("error getting current counter value: %s", err)
 	}
 
 	if len(gr.Kvs) > 0 {
 		// Note: this would overflow but it is constrained by the maxval flag
-		value, err = strconv.Atoi(string(gr.Kvs[0].Value))
+		value, err := strconv.Atoi(string(gr.Kvs[0].Value))
 		if err != nil {
 			// should not happen
 			log.Fatalf("invalid value for counter in etcd: could not conver to int: %s", err)
 		}
+
+		return value, gr.Kvs[0].ModRevision, nil
 	}
 
-	return value, nil
+	return 0, 0, nil
 }
 
 // resetEtcd deletes the counter key to reset it
@@ -192,7 +199,7 @@ func runBench(ctx context.Context, kv clientv3.KV, session *concurrency.Session)
 	StartFizzBuzzer(ctx, kv, session, done)
 	diff := time.Now().Sub(start)
 
-	value, _ := getValue(ctx, kv)
+	value, _, _ := getValue(ctx, kv)
 
 	fmt.Printf("Benchmark completed. Reached %d in %0.3f seconds\n", value, float64(diff.Nanoseconds())/float64(time.Second))
 
